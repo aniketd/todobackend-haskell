@@ -25,7 +25,7 @@ import Web.PathPieces
 
 type Latitude   = Double
 type Longitude  = Double
--- data TodoLocation = TodoLocation Latitude Longitude deriving (Show)
+type Timestamp  = Double
 
 share [mkPersist sqlSettings, mkMigrate "migrateAll"] [persistLowerCase|
 Todo
@@ -34,6 +34,7 @@ Todo
     order Int
     latitude Latitude
     longitude Longitude
+    timestamp Timestamp
     deriving Show
 |]
 
@@ -45,6 +46,7 @@ data TodoResponse = TodoResponse
   , trorder     :: Int
   , trlatitude  :: Latitude
   , trlongitude :: Longitude
+  , trtimestamp :: Timestamp
   } deriving (Show)
 
 $(deriveToJSON defaultOptions { fieldLabelModifier = drop 2}
@@ -52,7 +54,7 @@ $(deriveToJSON defaultOptions { fieldLabelModifier = drop 2}
 
 mkTodoResponse :: String -> Sqlite.Entity Todo -> TodoResponse
 mkTodoResponse rootUrl (Sqlite.Entity key Todo{..}) =
-    TodoResponse key todoUrl todoTitle todoCompleted todoOrder todoLatitude todoLongitude
+    TodoResponse key todoUrl todoTitle todoCompleted todoOrder todoLatitude todoLongitude todoTimestamp
   where
     todoUrl = rootUrl ++ "/todos/" ++ Text.unpack (toPathPiece key)
 
@@ -62,6 +64,7 @@ data TodoAction = TodoAction
   , actOrder :: Maybe Int
   , actLatitude :: Maybe Latitude
   , actLongitude :: Maybe Longitude
+  , actTimestamp :: Maybe Timestamp
   } deriving Show
 
 instance FromJSON TodoAction where
@@ -71,15 +74,17 @@ instance FromJSON TodoAction where
     <*> o .:? "order"
     <*> o .:? "latitude"
     <*> o .:? "longitude"
+    <*> o .:? "timestamp"
   parseJSON _ = mzero
 
 instance ToJSON TodoAction where
-  toJSON (TodoAction mTitle mCompl mOrder mLatitude mLongitude) = noNullsObject
+  toJSON (TodoAction mTitle mCompl mOrder mLatitude mLongitude mTimestamp) = noNullsObject
       [ "title"     .= mTitle
       , "completed" .= mCompl
       , "order"     .= mOrder
       , "latitude"  .= mLatitude
       , "longitude" .= mLongitude
+      , "timestamp" .= mTimestamp
       ]
     where
       noNullsObject = object . filter notNull
@@ -87,13 +92,14 @@ instance ToJSON TodoAction where
       notNull _         = True
 
 actionToTodo :: TodoAction -> Todo
-actionToTodo (TodoAction mTitle mCompleted mOrder mLatitude mLongitude) = Todo title completed order latitude longitude
+actionToTodo (TodoAction mTitle mCompleted mOrder mLatitude mLongitude mTimestamp) = Todo title completed order latitude longitude timestamp
   where
     title     = fromMaybe "" mTitle
     completed = fromMaybe False mCompleted
     order     = fromMaybe 0 mOrder
     latitude  = fromMaybe 0.0  mLatitude
     longitude = fromMaybe 0.0  mLongitude
+    timestamp = fromMaybe 0.0  mTimestamp
 
 actionToUpdates :: TodoAction -> [Sqlite.Update Todo]
 actionToUpdates act =  updateTitle
@@ -101,6 +107,7 @@ actionToUpdates act =  updateTitle
                     ++ updateOrd
                     ++ updateLatitude
                     ++ updateLongitude
+                    ++ updateTimestamp
   where
     updateTitle = maybe [] (\title -> [TodoTitle Sqlite.=. title])
                   (actTitle act)
@@ -112,6 +119,8 @@ actionToUpdates act =  updateTitle
                   (actLatitude act)
     updateLongitude = maybe [] (\longitude -> [TodoLongitude Sqlite.=. longitude])
                   (actLongitude act)
+    updateTimestamp = maybe [] (\timestamp -> [TodoTimestamp Sqlite.=. timestamp])
+                  (actTimestamp act)
 
 runDb :: Sqlite.SqlPersistT (ResourceT (NoLoggingT IO)) a -> IO a
 runDb = runNoLoggingT . runResourceT . Sqlite.withSqliteConn "dev.sqlite3" . Sqlite.runSqlConn
